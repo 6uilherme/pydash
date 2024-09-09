@@ -27,35 +27,48 @@ class R2AFdash(IR2A):
         self.tempoFinal = time.perf_counter()
         self.buffer = list()
         self.qualidade = list()
-        self.T = 1/4 # corresponde a 1/4 do tamanho do segmento de 1s
+        self.T = 0.10 # constante T para o tempo de segmentos de 1s
 
+    # define o valor de retorno do buffering time para o controlador fuzzy
     def get_buffering_time(self):
         if len(self.buffer) > 0:
             return self.buffer[-1]
         else:
             return 1
 
+    # define o valor de retorno do differential buffering time para o controlador fuzzy
     def get_differential_buffering_time(self):
         if len(self.buffer) > 1:
             return self.buffer[-2] - self.buffer[-1]
         else:
             return 0
 
-    def estimativa_throughput(self, output_fuzzy):
+    # estima a qualidade e multiplica pela saida da funcao de defuzificacao
+    def estimativa_qualidade(self, output_fuzzy):
         if len(self.qualidade) == 0:
-            valor = output_fuzzy*4 + 2
+            return round(output_fuzzy*4.75)
         elif len(self.qualidade) == 1:
             valor =  self.qualidade[0]
-            print("valor1: ", valor)
         elif len(self.qualidade) == 2:
             valor = output_fuzzy*(self.qualidade[0]+self.qualidade[1])/2
-            print("valor1: ", valor)
         else:
             valor = output_fuzzy*(self.qualidade[-3]+self.qualidade[-2]+self.qualidade[-1])/3
         if valor >= 19:
-            return 19
+            valor = 19
+        valor = self.controle_flutuacoes(valor)
         return round(valor)
 
+    # politica de controle de flutuacoes
+    def controle_flutuacoes(self, valor):
+        print("valor: ", valor, "qualidade: ", self.qualidade[-1], "whiteboard: ", self.whiteboard.get_playback_buffer_size()[-1][1])
+        if (valor > self.qualidade[-1]) and (self.whiteboard.get_playback_buffer_size()[-1][1] < 35):
+            return self.qualidade[-1]
+        elif (valor < self.qualidade[-1]) and (self.whiteboard.get_playback_buffer_size()[-1][1] > 35):
+            return self.qualidade[-1]
+        else:
+            return valor
+
+    # método que realiza os processos de fuzificação e defuzificação
     def controlador_fuzzy(self):
         # variaveis linguisticas
 
@@ -115,11 +128,11 @@ class R2AFdash(IR2A):
         n1 = math.sqrt(r2 ** 2 + r4 ** 2)
         n2 = math.sqrt(r1 ** 2)
 
-        # funcao de defuzzificacao
+        # funcao de defuzificacao
         output = (n2 * 0.25 + n1 * 0.5 + z * 1 + p1 * 2 + p2 * 4) / (n2 + n1 + z + p1 + p2)
 
         # definicao de qualidade
-        return self.estimativa_throughput(output)
+        return self.estimativa_qualidade(output)
 
     def handle_xml_request(self, msg):
         self.send_down(msg)
@@ -139,7 +152,9 @@ class R2AFdash(IR2A):
 
     def handle_segment_size_response(self, msg):
         self.tempoFinal = time.perf_counter()
+        # calcula o tempo entre a requisicao e a resposta
         self.buffer.append(self.tempoFinal-self.tempoInicial)
+        # adiciona a ultima qualidade do buffer a lista de qualidades
         if(len(self.whiteboard.get_playback_qi()) > 0):
             self.qualidade.append(self.whiteboard.get_playback_qi()[-1][1])
         self.send_up(msg)
